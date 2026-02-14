@@ -1,4 +1,4 @@
-### Système des gestions des incidents ###
+# Système des gestions des incidents #
 
 ## Setup ##
 
