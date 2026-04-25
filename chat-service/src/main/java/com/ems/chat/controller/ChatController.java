@@ -1,44 +1,92 @@
+// ChatController.java
 package com.ems.chat.controller;
 
-import org.springframework.core.io.Resource;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import reactor.core.publisher.Flux;
-
-import java.time.LocalDate;
-import java.util.Map;
+import com.ems.chat.dto.conversation.ConversationRequestDTO;
+import com.ems.chat.dto.conversation.ConversationResponseDTO;
+import com.ems.chat.dto.incident.IncidentCreatedResponseDTO;
+import com.ems.chat.dto.message.ChatRequestDTO;
+import com.ems.chat.dto.message.ChatResponseDTO;
+import com.ems.chat.dto.suggestion.SuggestionsDTO;
+import com.ems.chat.entity.ChatConversation;
+import com.ems.chat.services.conversation.ConversationService;
+import com.ems.chat.services.message.ChatServices;
+import com.ems.chat.services.suggestion.SuggestionsService;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import java.util.List;
+import java.util.UUID;
 
 @RestController
-@RequestMapping("api/chat")
+@RequestMapping("/api/chat")
 public class ChatController {
-    @Value("classpath:/prompt/ai_rules.st")
-    private Resource ai_rules;
-    private final ChatClient chatClient;
+    private final ChatServices chatServices;
+    private final ConversationService conversationService;
+    private final SuggestionsService suggestionsService;
 
-    public ChatController(ChatClient.Builder chatClientBuilder) {
-        this.chatClient = chatClientBuilder
-                .build();
+    public ChatController(
+            ChatServices chatServices,
+            ConversationService conversationService,
+            SuggestionsService suggestionsService
+    ) {
+        this.chatServices = chatServices;
+        this.conversationService = conversationService;
+        this.suggestionsService = suggestionsService;
     }
 
-    @GetMapping("/ask")
-    public Flux<String> askAI(@RequestParam(value = "message") String message) {
-        PromptTemplate template = new PromptTemplate(ai_rules);
-        Map<String, Object> map = Map.of(
-                "company_name", "ENACTUS",
-                "current_date", LocalDate.now().toString()
-        );
-        Message system_rules = template.createMessage(map);
-        return this.chatClient.prompt()
-                .system(system_rules.getText())
-                .user(message)
-                .stream()
-                .content();
+    // ─── Conversation ─────────────────────────────────────────────────
+    @PostMapping("/conversation")
+    public ResponseEntity<ConversationResponseDTO> createConversation(@RequestBody ConversationRequestDTO request) {
+        return ResponseEntity.ok(conversationService.createConversation(request));
+    }
+
+    @GetMapping("/conversation/{conversationId}")
+    public ResponseEntity<ConversationResponseDTO> getConversation(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(conversationService.GetConversation(conversationId));
+    }
+
+    @PatchMapping("/conversation/{conversationId}/status")
+    public ResponseEntity<ConversationResponseDTO> updateStatus(
+            @PathVariable UUID conversationId,
+            @RequestParam ChatConversation.Statutconversation statut
+    ) {
+        return ResponseEntity.ok(conversationService.updateStatus(conversationId, statut));
+    }
+
+    @PatchMapping("/conversation/{conversationId}/probleme")
+    public ResponseEntity<ConversationResponseDTO> updateProblemeResume(
+            @PathVariable UUID conversationId,
+            @RequestParam String problemeResume
+    ) {
+        return ResponseEntity.ok(conversationService.updateProblemResume(conversationId, problemeResume));
+    }
+
+    /**
+     * Déclenché quand l'utilisateur confirme qu'aucune solution ne fonctionne.
+     * Crée un incident dans le Service Incident et passe le statut à INCIDENT_CRÉÉ.
+     */
+    @PostMapping("/conversation/{conversationId}/create-incident")
+    public ResponseEntity<IncidentCreatedResponseDTO> createIncident(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(conversationService.createIncident(conversationId));
+    }
+
+    // ─── Message (REST uniquement — le streaming est via WebSocket) ───
+    @GetMapping("/conversation/{conversationId}/history")
+    public ResponseEntity<List<ChatResponseDTO>> history(@PathVariable UUID conversationId) {
+        return ResponseEntity.ok(chatServices.GetHistory(conversationId));
+    }
+
+    @PutMapping("/message/{messageId}")
+    public ResponseEntity<Void> changeAnswer(
+            @PathVariable UUID messageId,
+            @RequestBody ChatRequestDTO request
+    ) {
+        chatServices.ChangeAnswer(messageId, request).block();
+        return ResponseEntity.ok().build();
+    }
+
+    // ─── Suggestions ──────────────────────────────────────────────────
+    @PatchMapping("/suggestion/{suggestionId}/accept")
+    public ResponseEntity<SuggestionsDTO> acceptSuggestion(@PathVariable UUID suggestionId) {
+        return ResponseEntity.ok(suggestionsService.acceptSuggestion(suggestionId));
     }
 }
-

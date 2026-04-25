@@ -13,6 +13,6 @@ import java.util.UUID;
 @Repository
 public interface ChatMessagesRepo extends JpaRepository<ChatMessages, UUID> {
     List<ChatMessages> findByConversationId(UUID conversationID);
-    @Query("select m from ChatMessages m where m.timestamp> :myTimeStamp and m.conversation.id==:myConversationId ")
-    List<ChatMessages> filterByTimeStamp(@Param("myTimeStamp")LocalDateTime timeStamp, @Param("myConversation")UUID myConversation);
+    @Query("select m from ChatMessages m where m.timestamp > :myTimeStamp and m.conversation.id = :myConversationId")
+    List<ChatMessages> filterByTimeStamp(@Param("myTimeStamp") LocalDateTime timeStamp, @Param("myConversationId") UUID myConversation);
 }

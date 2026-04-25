@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 public interface ChatServices {
-    Flux<ChatResponseDTO> ChatAnswer(ChatRequestDTO request);
+    Flux<ChatResponseDTO> ChatAnswer(UUID conversationId, ChatRequestDTO request);
     List<ChatResponseDTO> GetHistory(UUID conversation_id);
-    Mono<Void> ChangeUpdate(ChatRequestDTO request);
+    Mono<Void> ChangeAnswer(UUID messageId, ChatRequestDTO request);
 }

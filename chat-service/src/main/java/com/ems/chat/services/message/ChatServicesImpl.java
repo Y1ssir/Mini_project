@@ -2,13 +2,15 @@ package com.ems.chat.services.message;
 
 import com.ems.chat.dto.message.ChatRequestDTO;
 import com.ems.chat.dto.message.ChatResponseDTO;
+import com.ems.chat.dto.suggestion.IncidentSimilaireDTO;
 import com.ems.chat.entity.ChatConversation;
 import com.ems.chat.entity.ChatMessages;
 import com.ems.chat.mapper.message.ChatMapper;
 import com.ems.chat.repository.ChatConversationRepo;
 import com.ems.chat.repository.ChatMessagesRepo;
+import com.ems.chat.services.rag.RagService;
+import com.ems.chat.services.suggestion.SuggestionsService;
 import jakarta.transaction.Transactional;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -24,28 +26,41 @@ public class ChatServicesImpl implements ChatServices {
     private final ChatMessagesRepo chatRepo;
     private final ChatConversationRepo conversationRepo;
     private final ChatMapper chatMapper;
-    private final ChatClient chatClient;
+    private final org.springframework.ai.chat.client.ChatClient chatClient; // ✅
+    private final RagService ragService;
+    private final SuggestionsService suggestionsService;
 
     public ChatServicesImpl(
             ChatMessagesRepo chatRepo,
             ChatConversationRepo conversationRepo,
             ChatMapper chatMapper,
-            ChatClient.Builder chatClientBuilder
+            org.springframework.ai.chat.client.ChatClient.Builder chatClientBuilder,
+            RagService ragService,
+            SuggestionsService suggestionsService
     ) {
         this.chatRepo = chatRepo;
         this.conversationRepo = conversationRepo;
         this.chatMapper = chatMapper;
         this.chatClient = chatClientBuilder.build();
+        this.ragService = ragService;
+        this.suggestionsService = suggestionsService;
     }
+
     @Override
-    public Flux<ChatResponseDTO> ChatAnswer(ChatRequestDTO request) {
+    public Flux<ChatResponseDTO> ChatAnswer(UUID conversationId, ChatRequestDTO request) {
         String sender = "BOT";
         String timestamp = LocalDateTime.now().toString();
         AtomicReference<String> fullResponse = new AtomicReference<>("");
+
+        List<IncidentSimilaireDTO> incidents = ragService.findSimilaires(request.message());
+        String incidentsFormatted = ragService.formatForPrompt(incidents);
+        suggestionsService.saveSuggestions(conversationId, incidents);
+
         Mono<ChatConversation> conversationMono = Mono.<ChatConversation>fromCallable(() ->
-                conversationRepo.findById(request.conversationId())
+                conversationRepo.findById(conversationId)
                         .orElseThrow(() -> new RuntimeException("Conversation introuvable"))
         ).subscribeOn(Schedulers.boundedElastic()).cache();
+
         Mono<Void> saveUser = conversationMono.flatMap(conversation ->
                 Mono.fromRunnable(() -> {
                     ChatMessages userEntity = chatMapper.toEntity(request);
@@ -54,7 +69,16 @@ public class ChatServicesImpl implements ChatServices {
                     chatRepo.save(userEntity);
                 }).subscribeOn(Schedulers.boundedElastic())
         ).then();
-        Flux<ChatResponseDTO> stream = chatClient.prompt(request.message())
+
+        Flux<ChatResponseDTO> stream = chatClient.prompt()
+                .system("""
+                    Tu es un assistant IT.
+                    Voici des incidents similaires résolus :
+                    %s
+                    Propose ces solutions à l'utilisateur.
+                    Si aucune ne fonctionne, propose de créer un incident.
+                """.formatted(incidentsFormatted))
+                .user(request.message())
                 .stream()
                 .content()
                 .filter(chunk -> chunk != null && !chunk.isEmpty())
@@ -70,44 +94,46 @@ public class ChatServicesImpl implements ChatServices {
 
         Flux<ChatResponseDTO> endSignal = Flux.defer(() ->
                 conversationMono.flatMap(conversation ->
-                        Mono.fromRunnable(() -> {
-                            ChatMessages botEntity = new ChatMessages();
-                            botEntity.setConversation(conversation);
-                            botEntity.setMessage(fullResponse.get());
-                            botEntity.setExpediteur(ChatMessages.Speaker.BOT);
-                            chatRepo.save(botEntity);
-                        }).subscribeOn(Schedulers.boundedElastic())
-                ).thenReturn(new ChatResponseDTO(
-                        ChatResponseDTO.FluxStatut.END, "", sender, timestamp))
+                                Mono.fromRunnable(() -> {
+                                    ChatMessages botEntity = new ChatMessages();
+                                    botEntity.setConversation(conversation);
+                                    botEntity.setMessage(fullResponse.get());
+                                    botEntity.setExpediteur(ChatMessages.Speaker.BOT);
+                                    chatRepo.save(botEntity);
+                                }).subscribeOn(Schedulers.boundedElastic())
+                        ).thenReturn(new ChatResponseDTO(
+                                ChatResponseDTO.FluxStatut.END, "", sender, timestamp))
                         .flux()
         );
+
         return saveUser
                 .thenMany(stream.concatWith(endSignal))
                 .onErrorResume(e -> Flux.just(new ChatResponseDTO(
                         ChatResponseDTO.FluxStatut.END, "Erreur: " + e.getMessage(), sender, timestamp)
                 ));
     }
+
     @Override
-    public List<ChatResponseDTO> GetHistory(UUID conversation_id) {
-        List<ChatMessages> history = chatRepo.findByConversationId(conversation_id);
+    public List<ChatResponseDTO> GetHistory(UUID conversationId) {
+        List<ChatMessages> history = chatRepo.findByConversationId(conversationId);
         return chatMapper.toDTOList(history);
     }
+
     @Override
     @Transactional
-    public Mono<Void> ChangeUpdate(ChatRequestDTO request) {
-        return Mono.fromCallable(() -> {
-                    ChatMessages messageEntity = chatRepo.findById(request.messageId())
-                            .orElseThrow(() -> new RuntimeException("Message introuvable"));
-                    List<ChatMessages> messageToDelete = chatRepo.filterByTimeStamp(
-                            messageEntity.getTimestamp(),
-                            messageEntity.getConversation().getId()
-                    );
-                    chatRepo.deleteAll(messageToDelete);
-                    messageEntity.setMessage(request.message());
-                    chatRepo.save(messageEntity);
-                    return null;
-                })
-                .subscribeOn(Schedulers.boundedElastic())
-                .then();
+    public Mono<Void> ChangeAnswer(UUID messageId, ChatRequestDTO request) {
+        return Mono.fromRunnable(() -> {
+            ChatMessages messageEntity = chatRepo.findById(messageId)
+                    .orElseThrow(() -> new RuntimeException("Message introuvable : " + messageId));
+            List<ChatMessages> messageToDelete = chatRepo.filterByTimeStamp(
+                    messageEntity.getTimestamp(),
+                    messageEntity.getConversation().getId()
+            );
+            if (!messageToDelete.isEmpty()) {
+                chatRepo.deleteAll(messageToDelete);
+            }
+            messageEntity.setMessage(request.message());
+            chatRepo.save(messageEntity);
+        }).subscribeOn(Schedulers.boundedElastic()).then();
     }
 }

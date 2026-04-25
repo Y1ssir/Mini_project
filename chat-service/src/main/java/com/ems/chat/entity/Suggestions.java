@@ -33,4 +33,5 @@ public class Suggestions {
     public void setIncidentSimilaireId(UUID incidentSimilaireId){this.incidentSimilaireId=incidentSimilaireId;}
     public void setScore_similarite(float score_similarite){this.score_similarite=score_similarite;}
     public void setAccepte(boolean accepte){this.accepte=accepte;}
+    public void setConversation(ChatConversation conversation) {this.conversation = conversation;}
 }
