@@ -1,0 +1,57 @@
+server:
+  port: 8761
+
+spring:
+  application:
+    name: eureka-server
+  security:
+    user:
+      name: ${EUREKA_USERNAME:admin}
+      password: ${EUREKA_PASSWORD:admin}
+
+# ============================================================
+# Configuration Eureka Server
+# ============================================================
+eureka:
+  instance:
+    hostname: ${EUREKA_HOSTNAME:localhost}
+    # Préférer l'adresse IP dans les environnements Docker
+    prefer-ip-address: false
+
+  client:
+    # ⚠️ CRITIQUE : Le serveur Eureka ne doit PAS s'enregistrer lui-même
+    register-with-eureka: false
+    # ⚠️ CRITIQUE : Le serveur Eureka ne doit PAS récupérer le registre
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${EUREKA_USERNAME:admin}:${EUREKA_PASSWORD:admin}@${eureka.instance.hostname}:${server.port}/eureka/
+
+  server:
+    # Délai de démarrage avant que le serveur commence à expirer les instances
+    wait-time-in-ms-when-sync-empty: 0
+    # Désactive l'auto-protection en développement (en prod, mettre à true)
+    enable-self-preservation: false
+    # Intervalle d'éviction des instances expirées (en ms)
+    eviction-interval-timer-in-ms: 5000
+
+
+# ============================================================
+# Actuator / HealthCheck
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# ============================================================
+# Logging
+# ============================================================
+logging:
+  level:
+    com.netflix.eureka: WARN
+    com.netflix.discovery: WARN
+    com.incident.eureka: DEBUG

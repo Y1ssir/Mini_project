@@ -1,0 +1,211 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+
+  # ============================================================
+  # Spring Cloud Config Client
+  # Le Gateway récupère sa config depuis le Config Server
+  # ============================================================
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}
+
+  # ============================================================
+  # OAuth2 Resource Server - Validation JWT Keycloak
+  # ============================================================
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # URI de l'issuer Keycloak (realm incident-realm)
+          # Spring Security télécharge automatiquement les clés JWKS depuis :
+          # http://keycloak:8080/realms/incident-realm/.well-known/openid-configuration
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://keycloak:8080/realms/incident-realm}
+
+  # ============================================================
+  # Spring Cloud Gateway - Routage vers les microservices
+  # lb:// = Load Balanced via Eureka (service discovery)
+  # ============================================================
+  cloud:
+    # --------------------------------------------------------
+    # Config Client - Credentials pour le Config Server sécurisé
+    # ⚠️ FIX : doit être DANS spring.cloud (pas en clé plate racine)
+    # --------------------------------------------------------
+    config:
+      uri: ${CONFIG_SERVER_URI:http://localhost:8888}
+      username: ${CONFIG_SERVER_USERNAME:configuser}
+      password: ${CONFIG_SERVER_PASSWORD:configpassword}
+      fail-fast: true
+      retry:
+        max-attempts: 6
+        initial-interval: 2000
+        max-interval: 10000
+        multiplier: 1.5
+
+    gateway:
+      # Activer la découverte automatique de services via Eureka
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+      # --------------------------------------------------------
+      # Routes de l'API Gateway
+      # --------------------------------------------------------
+      routes:
+
+        # ---- USER SERVICE ----
+        - id: user-service
+          uri: lb://USER-SERVICE
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: user-service-cb
+                fallbackUri: forward:/fallback/user-service
+            - RewritePath=/api/users/(?<segment>.*), /api/users/${segment}
+            - AddRequestHeader=X-Gateway-Source, incident-gateway
+
+        # ---- INCIDENT SERVICE ----
+        - id: incident-service
+          uri: lb://INCIDENT-SERVICE
+          predicates:
+            - Path=/api/incidents/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: incident-service-cb
+                fallbackUri: forward:/fallback/incident-service
+            - AddRequestHeader=X-Gateway-Source, incident-gateway
+
+        # ---- COMMENT SERVICE ----
+        - id: comment-service
+          uri: lb://COMMENT-SERVICE
+          predicates:
+            - Path=/api/comments/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: comment-service-cb
+                fallbackUri: forward:/fallback/comment-service
+            - AddRequestHeader=X-Gateway-Source, incident-gateway
+
+        # ---- CHAT SERVICE ----
+        - id: chat-service
+          uri: lb://CHAT-SERVICE
+          predicates:
+            - Path=/api/chat/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: chat-service-cb
+                fallbackUri: forward:/fallback/chat-service
+            - AddRequestHeader=X-Gateway-Source, incident-gateway
+
+        # ---- ROUTE FALLBACK (pour les endpoints de fallback) ----
+        - id: fallback-route
+          uri: no://op
+          predicates:
+            - Path=/fallback/**
+
+      # --------------------------------------------------------
+      # Configuration globale CORS (backup si SecurityConfig ne suffit pas)
+      # --------------------------------------------------------
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders: "*"
+            allowCredentials: true
+            maxAge: 3600
+
+      # --------------------------------------------------------
+      # Paramètres par défaut des filtres
+      # --------------------------------------------------------
+      default-filters:
+        - AddResponseHeader=X-Gateway-Version, 1.0.0
+
+# ============================================================
+# Eureka Client
+# ============================================================
+eureka:
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://admin:admin@localhost:8761/eureka/}
+
+# (Config Client credentials moved into spring.cloud.config above)
+
+# ============================================================
+# Resilience4j - Circuit Breaker & Rate Limiter
+# ============================================================
+resilience4j:
+  circuitbreaker:
+    instances:
+      user-service-cb:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+      incident-service-cb:
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+      comment-service-cb:
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 20s
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+      chat-service-cb:
+        failure-rate-threshold: 70
+        wait-duration-in-open-state: 15s
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+
+  timelimiter:
+    instances:
+      user-service-cb:
+        timeout-duration: 10s
+      incident-service-cb:
+        timeout-duration: 15s
+      comment-service-cb:
+        timeout-duration: 10s
+      chat-service-cb:
+        timeout-duration: 5s
+
+# ============================================================
+# Actuator / HealthCheck
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway,circuitbreakers,prometheus
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      enabled: true
+
+# ============================================================
+# Logging
+# ============================================================
+logging:
+  level:
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG
+    com.incident.gateway: DEBUG
+    io.github.resilience4j: WARN

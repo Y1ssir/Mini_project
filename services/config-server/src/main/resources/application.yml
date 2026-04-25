@@ -1,0 +1,78 @@
+server:
+  port: 8888
+
+spring:
+  application:
+    name: config-server
+
+  # ============================================================
+  # Authentification Basic Auth pour l'accès au Config Server
+  # Les microservices clients utilisent ces credentials
+  # ============================================================
+  security:
+    user:
+      name: ${CONFIG_SERVER_USERNAME:configuser}
+      password: ${CONFIG_SERVER_PASSWORD:configpassword}
+
+  # ============================================================
+  # Backend Git - Source de vérité pour les configurations
+  # En développement : répertoire Git local (config-repo/)
+  # En production : URL d'un dépôt Git distant (GitHub, GitLab...)
+  # ============================================================
+  cloud:
+    config:
+      server:
+        git:
+          # URI du dépôt de configuration
+          # En dev : chemin local monté dans le conteneur
+          # En prod : remplacer par l'URL du dépôt distant
+          uri: ${CONFIG_REPO_URI:file:///config-repo}
+
+          # Branche à utiliser (main ou master selon le dépôt)
+          default-label: ${CONFIG_REPO_BRANCH:main}
+
+          # Cloner toujours depuis le dépôt (pas de cache)
+          clone-on-start: true
+
+          # Forcer le refresh périodique (utile avec GitHub)
+          force-pull: true
+
+          # Répertoire local de clone (utile pour les dépôts distants)
+          basedir: /tmp/config-cache
+
+          # Timeout de connexion au dépôt Git
+          timeout: 10
+
+# ============================================================
+# Enregistrement auprès d'Eureka
+# ============================================================
+eureka:
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://admin:admin@localhost:8761/eureka/}
+    # Le Config Server attend qu'Eureka soit prêt
+    initial-instance-info-replication-interval-seconds: 10
+    registry-fetch-interval-seconds: 30
+
+# ============================================================
+# Actuator / HealthCheck
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,refresh
+  endpoint:
+    health:
+      show-details: always
+
+# ============================================================
+# Logging
+# ============================================================
+logging:
+  level:
+    org.springframework.cloud.config: DEBUG
+    com.incident.config: DEBUG
