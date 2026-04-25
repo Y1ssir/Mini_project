@@ -1,0 +1,87 @@
+# ============================================================
+# incident-service.yml - Configuration spécifique au Incident Service
+# ============================================================
+
+server:
+  port: ${INCIDENT_SERVICE_PORT:8082}
+
+spring:
+  application:
+    name: incident-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:postgres}:${DB_PORT:5432}/${INCIDENT_DB_NAME:incident_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  # ----------------------------------------
+  # Kafka / Messaging (optionnel - pour les événements)
+  # ----------------------------------------
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: incident-service-group
+      auto-offset-reset: earliest
+
+# ----------------------------------------
+# MinIO - Pièces jointes des incidents
+# ----------------------------------------
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+  access-key: ${MINIO_ACCESS_KEY:minioadmin}
+  secret-key: ${MINIO_SECRET_KEY:minioadmin}
+  bucket:
+    attachments: incident-attachments
+
+# ----------------------------------------
+# Communication inter-services via Feign/WebClient
+# ----------------------------------------
+services:
+  user-service:
+    url: lb://USER-SERVICE
+  comment-service:
+    url: lb://COMMENT-SERVICE
+
+# ----------------------------------------
+# Paramètres métier des incidents
+# ----------------------------------------
+app:
+  incident:
+    # Niveaux de priorité
+    priorities:
+      - LOW
+      - MEDIUM
+      - HIGH
+      - CRITICAL
+    # Statuts possibles
+    statuses:
+      - OPEN
+      - IN_PROGRESS
+      - RESOLVED
+      - CLOSED
+      - CANCELLED
+    # SLA par priorité (en heures)
+    sla:
+      LOW: 72
+      MEDIUM: 24
+      HIGH: 8
+      CRITICAL: 2
+    # Taille maximale des pièces jointes (10 MB)
+    max-attachment-size: 10485760
+
+logging:
+  level:
+    com.incident.incident: DEBUG

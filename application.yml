@@ -1,0 +1,85 @@
+# ============================================================
+# application.yml - Configuration COMMUNE à tous les microservices
+# ============================================================
+# Ce fichier est chargé par TOUS les services qui utilisent le Config Server.
+# Les propriétés ici sont des valeurs par défaut, surchargées par les fichiers
+# spécifiques à chaque service ({service-name}.yml).
+# ============================================================
+
+# ============================================================
+# Eureka Client - Découverte de services
+# ============================================================
+eureka:
+  instance:
+    prefer-ip-address: true
+    # Durée avant qu'Eureka considère un service mort (secondes)
+    lease-expiration-duration-in-seconds: 30
+    # Fréquence d'envoi du heartbeat (secondes)
+    lease-renewal-interval-in-seconds: 10
+  client:
+    service-url:
+      defaultZone: ${EUREKA_DEFAULT_ZONE:http://admin:admin@eureka-server:8761/eureka/}
+    registry-fetch-interval-seconds: 30
+    initial-instance-info-replication-interval-seconds: 40
+
+# ============================================================
+# Keycloak / OAuth2 - Configuration commune
+# ============================================================
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://keycloak:8080/realms/incident-realm}
+
+# ============================================================
+# Base de données PostgreSQL - Paramètres communs
+# ============================================================
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      connection-test-query: SELECT 1
+
+  jpa:
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+# ============================================================
+# Actuator - Healthcheck commun
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+  health:
+    db:
+      enabled: true
+    diskspace:
+      enabled: true
+
+# ============================================================
+# Logging commun
+# ============================================================
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{correlationId}] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    org.springframework: WARN
+    org.hibernate.SQL: WARN

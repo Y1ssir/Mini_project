@@ -1,0 +1,32 @@
+# ============================================================
+# gateway.yml - Configuration externe du Gateway (via Config Server)
+# ============================================================
+# Ce fichier surcharge ou complète application.yml du Gateway.
+# Utile pour modifier le routage sans rebuilder l'image Docker.
+# ============================================================
+
+# Overrides spécifiques au profil de production
+spring:
+  cloud:
+    gateway:
+      # En production, désactiver le locator automatique
+      # et utiliser les routes explicites uniquement
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+      # Timeout globaux
+      httpclient:
+        connect-timeout: 5000
+        response-timeout: 30s
+
+# Paramètres de sécurité supplémentaires via config externe
+app:
+  gateway:
+    # IPs autorisées pour les routes admin (non implémenté par défaut)
+    allowed-admin-ips:
+      - 127.0.0.1
+      - 10.0.0.0/8
+    # Activer les logs détaillés des requêtes
+    request-logging-enabled: true
