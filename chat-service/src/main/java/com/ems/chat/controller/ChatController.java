@@ -26,8 +26,7 @@ public class ChatController {
     public ChatController(
             ChatServices chatServices,
             ConversationService conversationService,
-            SuggestionsService suggestionsService
-    ) {
+            SuggestionsService suggestionsService) {
         this.chatServices = chatServices;
         this.conversationService = conversationService;
         this.suggestionsService = suggestionsService;
@@ -47,16 +46,14 @@ public class ChatController {
     @PatchMapping("/conversation/{conversationId}/status")
     public ResponseEntity<ConversationResponseDTO> updateStatus(
             @PathVariable UUID conversationId,
-            @RequestParam ChatConversation.Statutconversation statut
-    ) {
+            @RequestParam ChatConversation.Statutconversation statut) {
         return ResponseEntity.ok(conversationService.updateStatus(conversationId, statut));
     }
 
     @PatchMapping("/conversation/{conversationId}/probleme")
     public ResponseEntity<ConversationResponseDTO> updateProblemeResume(
             @PathVariable UUID conversationId,
-            @RequestParam String problemeResume
-    ) {
+            @RequestParam String problemeResume) {
         return ResponseEntity.ok(conversationService.updateProblemResume(conversationId, problemeResume));
     }
 
@@ -78,8 +75,7 @@ public class ChatController {
     @PutMapping("/message/{messageId}")
     public ResponseEntity<Void> changeAnswer(
             @PathVariable UUID messageId,
-            @RequestBody ChatRequestDTO request
-    ) {
+            @RequestBody ChatRequestDTO request) {
         chatServices.ChangeAnswer(messageId, request).block();
         return ResponseEntity.ok().build();
     }
