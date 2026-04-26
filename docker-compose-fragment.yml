@@ -1,0 +1,90 @@
+# Fragment à intégrer dans le docker-compose.yml master (Member 1)
+services:
+
+  # ── Base de données — Incident Service ────────────────────────────────────
+  incident-db:
+    image: postgres:16-alpine
+    container_name: incident-db
+    environment:
+      POSTGRES_DB: incident_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - incident_db_data:/var/lib/postgresql/data
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d incident_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Base de données — Comment Service ─────────────────────────────────────
+  comment-db:
+    image: postgres:16-alpine
+    container_name: comment-db
+    environment:
+      POSTGRES_DB: comment_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - comment_db_data:/var/lib/postgresql/data
+    networks:
+      - microservices-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d comment_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Incident Service ───────────────────────────────────────────────────────
+  incident-service:
+    build: ./incident-service
+    container_name: incident-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://incident-db:5432/incident_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/incident-management
+    ports:
+      - "8081:8081"
+    depends_on:
+      incident-db:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+  # ── Comment Service ────────────────────────────────────────────────────────
+  comment-service:
+    build: ./comment-service
+    container_name: comment-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://comment-db:5432/comment_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://keycloak:8080/realms/incident-management
+    ports:
+      - "8082:8082"
+    depends_on:
+      comment-db:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - microservices-net
+
+volumes:
+  incident_db_data:
+  comment_db_data:
+
+networks:
+  microservices-net:
+    external: true
