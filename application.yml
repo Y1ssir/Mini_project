@@ -23,18 +23,22 @@ eureka:
     initial-instance-info-replication-interval-seconds: 40
 
 # ============================================================
-# Keycloak / OAuth2 - Configuration commune
+# Spring - Configuration commune
 # ============================================================
 spring:
+  # --------------------------------------------------------
+  # Keycloak / OAuth2 - Configuration commune
+  # --------------------------------------------------------
   security:
     oauth2:
       resourceserver:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://keycloak:8080/realms/incident-realm}
 
-# ============================================================
-# Base de données PostgreSQL - Paramètres communs
-# ============================================================
+  # --------------------------------------------------------
+  # Base de données PostgreSQL - Paramètres communs
+  # ⚠️ Chaque service surcharge spring.datasource.url dans son propre .yml
+  # --------------------------------------------------------
   datasource:
     driver-class-name: org.postgresql.Driver
     hikari:
@@ -45,6 +49,9 @@ spring:
       max-lifetime: 1200000
       connection-test-query: SELECT 1
 
+  # --------------------------------------------------------
+  # JPA - Paramètres communs
+  # --------------------------------------------------------
   jpa:
     open-in-view: false
     properties:
