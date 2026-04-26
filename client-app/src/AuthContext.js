@@ -1,6 +1,6 @@
 // AuthContext.js
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import keycloak from './index'; // your Keycloak instance
+import keycloak from './keycloak';
 
 const AuthContext = createContext(null);
 
