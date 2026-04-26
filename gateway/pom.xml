@@ -43,11 +43,13 @@
         </dependency>
 
         <!-- ⚠️ IMPORTANT : Spring Cloud Bus pour refresh dynamique de config -->
+        <!--
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-bus-amqp</artifactId>
             <optional>true</optional>
         </dependency>
+        -->
 
         <!-- OAuth2 Resource Server - Validation des tokens JWT Keycloak -->
         <dependency>
