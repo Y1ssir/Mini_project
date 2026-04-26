@@ -22,6 +22,8 @@ spring:
   cloud:
     config:
       server:
+        native:
+          search-locations: ${CONFIG_REPO_NATIVE_PATH:file:///config-repo}
         git:
           # URI du dépôt de configuration
           # En dev : chemin local monté dans le conteneur

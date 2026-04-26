@@ -1,5 +1,5 @@
 # ============================================================
-# application.yml - user-service
+# application.yml - chat-service
 # ============================================================
 # Configuration locale (développement sans Docker).
 # En mode Docker, les valeurs sont surchargées par les
@@ -8,38 +8,49 @@
 
 spring:
   application:
-    name: user-service
+    name: chat-service
 
   # --------------------------------------------------------
   # Config Server — charge la config centralisée depuis
-  # config-repo/user-service.yml au démarrage
+  # config-repo/chat-service.yml au démarrage
   # --------------------------------------------------------
   config:
     import: optional:configserver:${CONFIG_SERVER_URI:http://localhost:8888}
 
   # --------------------------------------------------------
-  # Base de données PostgreSQL (développement local)
-  # En Docker : surchargé par config-repo/user-service.yml
+  # Base de données PostgreSQL
+  # ✅ CORRIGÉ : nom de la base = chat_db (cohérent avec init-db.sql)
   # --------------------------------------------------------
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${USER_DB_NAME:user_db}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${CHAT_DB_NAME:chat_db}
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
-      # Hibernate gère les migrations (pas de Flyway dans ce service)
-      ddl-auto: update
+      # Flyway gère les migrations
+      ddl-auto: validate
     show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
+
+  # --------------------------------------------------------
+  # Spring AI — OpenAI / OpenRouter
+  # La clé API est fournie via la variable OPENROUTER_API_KEY
+  # --------------------------------------------------------
+  ai:
+    openai:
+      api-key: ${OPENROUTER_API_KEY:changeme}
+      base-url: https://openrouter.ai/api
+      chat:
+        options:
+          model: openai/gpt-4o-mini
+          temperature: 0.4
 
   # --------------------------------------------------------
   # OAuth2 Resource Server — Validation JWT Keycloak
-  # Keycloak est exposé sur 8180 (host), 8080 (Docker interne)
   # --------------------------------------------------------
   security:
     oauth2:
@@ -47,16 +58,8 @@ spring:
         jwt:
           issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/incident-realm}
 
-  # --------------------------------------------------------
-  # Upload de fichiers (avatars)
-  # --------------------------------------------------------
-  servlet:
-    multipart:
-      max-file-size: 5MB
-      max-request-size: 5MB
-
 server:
-  port: ${USER_SERVICE_PORT:8081}
+  port: ${CHAT_SERVICE_PORT:8084}
 
 # --------------------------------------------------------
 # Eureka Client — Enregistrement auprès du Service Register
@@ -81,15 +84,6 @@ spring.cloud.config:
   fail-fast: false
 
 # --------------------------------------------------------
-# MinIO — Stockage d'avatars (valeurs de dev local)
-# --------------------------------------------------------
-minio:
-  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
-  access-key: ${MINIO_ACCESS_KEY:minioadmin}
-  secret-key: ${MINIO_SECRET_KEY:minioadmin}
-  bucket: ${MINIO_BUCKET_AVATARS:user-avatars}
-
-# --------------------------------------------------------
 # Actuator
 # --------------------------------------------------------
 management:
@@ -106,6 +100,6 @@ management:
 # --------------------------------------------------------
 logging:
   level:
-    com.incidents.user_service: DEBUG
+    com.ems.chat: DEBUG
     org.springframework.security: WARN
-    io.minio: WARN
+    org.springframework.ai: WARN
