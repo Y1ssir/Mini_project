@@ -1,0 +1,90 @@
+{
+  "realm": "incident-realm",
+  "enabled": true,
+  "displayName": "Incident Management Platform",
+  "displayNameHtml": "<b>Incident Management</b>",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+
+  "clients": [
+    {
+      "clientId": "incident-frontend",
+      "name": "Incident Management Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:4200/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:4200"
+      ]
+    },
+    {
+      "clientId": "incident-backend",
+      "name": "Incident Management Backend",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "incident-backend-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true
+    }
+  ],
+
+  "roles": {
+    "realm": [
+      { "name": "ROLE_USER", "description": "Utilisateur standard" },
+      { "name": "ROLE_TECHNICIAN", "description": "Technicien en charge des incidents" },
+      { "name": "ROLE_MANAGER", "description": "Manager supervisant les équipes" },
+      { "name": "ROLE_ADMIN", "description": "Administrateur de la plateforme" }
+    ]
+  },
+
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@incident.local",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "System",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ROLE_ADMIN", "ROLE_USER"]
+    },
+    {
+      "username": "technicien1",
+      "email": "tech1@incident.local",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Jean",
+      "lastName": "Dupont",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "tech123",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ROLE_TECHNICIAN", "ROLE_USER"]
+    }
+  ]
+}

@@ -1,0 +1,371 @@
+# ============================================================
+# docker-compose.yml - Infrastructure complète
+# Gestion d'incidents - Architecture Microservices
+# ============================================================
+# Usage :
+#   Démarrage complet : docker-compose up --build
+#   Sans rebuild :       docker-compose up -d
+#   Arrêt :              docker-compose down
+#   Arrêt + volumes :    docker-compose down -v
+# ============================================================
+
+version: '3.9'
+
+# ============================================================
+# RÉSEAU DÉDIÉ
+# Tous les services communiquent via ce réseau interne.
+# Le réseau "incident-network" isole l'infrastructure.
+# ============================================================
+networks:
+  incident-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================
+# VOLUMES PERSISTANTS
+# Les données survivent aux redémarrages des conteneurs.
+# ============================================================
+volumes:
+  postgres_data:
+    driver: local
+  minio_data:
+    driver: local
+  keycloak_data:
+    driver: local
+  config_repo_data:
+    driver: local
+
+# ============================================================
+# SERVICES
+# ============================================================
+services:
+
+  # ----------------------------------------------------------
+  # POSTGRESQL - Base de données relationnelle
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: incident-postgres
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Script d'initialisation : crée les bases de données de chaque service
+      - ./infrastructure/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-incident_platform}
+      # Performance
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # KEYCLOAK - Gestion des identités et accès (IAM)
+  # Géré par Membre 2, mais intégré ici pour l'ensemble du stack.
+  # ----------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.2
+    container_name: incident-keycloak
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "8180:8080"  # Exposé sur 8180 pour éviter conflit avec Gateway (8080)
+    volumes:
+      # Import automatique du realm au démarrage
+      - ./infrastructure/keycloak/incident-realm.json:/opt/keycloak/data/import/incident-realm.json:ro
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Mode de démarrage (start-dev pour dev, start pour prod)
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${KEYCLOAK_DB:-keycloak_db}
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
+      KC_HOSTNAME_PORT: 8180
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    command:
+      - start-dev
+      - --import-realm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # ----------------------------------------------------------
+  # MINIO - Stockage objet compatible S3
+  # Pour les pièces jointes, avatars, fichiers partagés
+  # ----------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: incident-minio
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web MinIO
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ----------------------------------------------------------
+  # EUREKA SERVER - Registre de services
+  # ⚠️ Doit démarrer avant tous les autres microservices
+  # ----------------------------------------------------------
+  eureka-server:
+    build:
+      context: ./services/eureka-server
+      dockerfile: Dockerfile
+    image: incident/eureka-server:1.0.0
+    container_name: incident-eureka
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "8761:8761"
+    environment:
+      EUREKA_USERNAME: ${EUREKA_USERNAME:-admin}
+      EUREKA_PASSWORD: ${EUREKA_PASSWORD:-admin}
+      EUREKA_HOSTNAME: eureka-server
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ----------------------------------------------------------
+  # CONFIG SERVER - Configuration centralisée
+  # ⚠️ Doit démarrer après Eureka, avant les services métiers
+  # ----------------------------------------------------------
+  config-server:
+    build:
+      context: ./services/config-server
+      dockerfile: Dockerfile
+    image: incident/config-server:1.0.0
+    container_name: incident-config
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "8888:8888"
+    volumes:
+      # Monte le dossier config-repo dans le conteneur
+      - ./config-repo:/config-repo:ro
+    environment:
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      CONFIG_REPO_URI: file:///config-repo
+      CONFIG_REPO_BRANCH: main
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      JAVA_OPTS: "-Xms256m -Xmx512m"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # ----------------------------------------------------------
+  # API GATEWAY - Point d'entrée unique
+  # ⚠️ Doit démarrer après Eureka et Config Server
+  # ----------------------------------------------------------
+  gateway:
+    build:
+      context: ./services/gateway
+      dockerfile: Dockerfile
+    image: incident/gateway:1.0.0
+    container_name: incident-gateway
+    restart: unless-stopped
+    networks:
+      - incident-network
+    ports:
+      - "8080:8080"
+    environment:
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      # ⚠️ URL interne Keycloak (réseau Docker)
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/incident-realm
+      JAVA_OPTS: "-Xms512m -Xmx1g"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ----------------------------------------------------------
+  # USER SERVICE - Gestion des utilisateurs
+  # ⚠️ Placeholder - À remplacer par l'image buildée par Membre 2/3
+  # ----------------------------------------------------------
+  user-service:
+    image: ${USER_SERVICE_IMAGE:-eclipse-temurin:17-jre}
+    container_name: incident-user-service
+    restart: unless-stopped
+    networks:
+      - incident-network
+    # ports:
+    #   - "8081:8081"  # Décommenter pour accès direct (debug uniquement)
+    environment:
+      SPRING_APPLICATION_NAME: user-service
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      USER_DB_NAME: user_db
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/incident-realm
+    # Commande placeholder - remplacer par : java -jar user-service.jar
+    command: ["sleep", "infinity"]
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # INCIDENT SERVICE - Gestion des incidents
+  # ⚠️ Placeholder - À remplacer par l'image buildée par l'équipe
+  # ----------------------------------------------------------
+  incident-service:
+    image: ${INCIDENT_SERVICE_IMAGE:-eclipse-temurin:17-jre}
+    container_name: incident-incident-service
+    restart: unless-stopped
+    networks:
+      - incident-network
+    environment:
+      SPRING_APPLICATION_NAME: incident-service
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      INCIDENT_DB_NAME: incident_db
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/incident-realm
+    command: ["sleep", "infinity"]
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # COMMENT SERVICE - Gestion des commentaires
+  # ⚠️ Placeholder
+  # ----------------------------------------------------------
+  comment-service:
+    image: ${COMMENT_SERVICE_IMAGE:-eclipse-temurin:17-jre}
+    container_name: incident-comment-service
+    restart: unless-stopped
+    networks:
+      - incident-network
+    environment:
+      SPRING_APPLICATION_NAME: comment-service
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      COMMENT_DB_NAME: comment_db
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/incident-realm
+    command: ["sleep", "infinity"]
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ----------------------------------------------------------
+  # CHAT SERVICE - Messagerie temps réel
+  # ⚠️ Placeholder
+  # ----------------------------------------------------------
+  chat-service:
+    image: ${CHAT_SERVICE_IMAGE:-eclipse-temurin:17-jre}
+    container_name: incident-chat-service
+    restart: unless-stopped
+    networks:
+      - incident-network
+    environment:
+      SPRING_APPLICATION_NAME: chat-service
+      EUREKA_DEFAULT_ZONE: http://${EUREKA_USERNAME:-admin}:${EUREKA_PASSWORD:-admin}@eureka-server:8761/eureka/
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONFIG_SERVER_USERNAME: ${CONFIG_SERVER_USERNAME:-configuser}
+      CONFIG_SERVER_PASSWORD: ${CONFIG_SERVER_PASSWORD:-configpassword}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      CHAT_DB_NAME: chat_db
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/incident-realm
+    command: ["sleep", "infinity"]
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
